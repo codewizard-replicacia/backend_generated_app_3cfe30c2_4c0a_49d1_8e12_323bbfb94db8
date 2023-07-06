@@ -82,7 +82,7 @@ public class Product {
   
 		@OneToOne(cascade = CascadeType.ALL)
 	@JoinColumn(name = "\"ProductProductCategory\"", referencedColumnName = "\"Id\"", insertable = false, updatable = false)
-	private Category productCategory;
+        private Category productCategory;
 	
 	@Column(name = "\"ProductProductCategory\"")
 	private Long productProductCategory;
