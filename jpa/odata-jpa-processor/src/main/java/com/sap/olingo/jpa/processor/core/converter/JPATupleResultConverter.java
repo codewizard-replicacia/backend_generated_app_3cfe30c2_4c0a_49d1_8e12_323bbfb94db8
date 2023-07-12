@@ -286,7 +286,13 @@ abstract class JPATupleResultConverter implements JPAResultConverter {
       throws ODataJPAQueryException {
     try {
 //      final Long count = child.getCount(buildConcatenatedKey(parentRow, association.getLeftColumnsList()));
-      final Long count = child.getCount(buildConcatenatedKeyNew(parentRow, association.getJoinColumnsList()));
+//      final Long count = child.getCount(buildConcatenatedKeyNew(parentRow, association.getJoinColumnsList()));
+      Long count = null;
+      if(association.getLeftColumnsList().isEmpty()){
+        count = child.getCount(buildConcatenatedKeyNew(parentRow, association.getJoinColumnsList()));
+      } else{
+        count = child.getCount(buildConcatenatedKey(parentRow, association.getLeftColumnsList()));
+      }
       return count != null ? count.intValue() : null;
     } catch (final ODataJPAModelException e) {
       throw new ODataJPAQueryException(ODataJPAQueryException.MessageKeys.QUERY_RESULT_CONV_ERROR,
@@ -313,8 +319,16 @@ abstract class JPATupleResultConverter implements JPAResultConverter {
 //      final EntityCollection expandCollection = ((JPAConvertibleResult) child).getEntityCollection(
 //          buildConcatenatedKey(parentRow, association.getLeftColumnsList()));
 
-      final EntityCollection expandCollection = ((JPAConvertibleResult) child).getEntityCollection(
-              buildConcatenatedKeyNew(parentRow, association.getJoinColumnsList()));
+//      final EntityCollection expandCollection = ((JPAConvertibleResult) child).getEntityCollection(
+//              buildConcatenatedKeyNew(parentRow, association.getJoinColumnsList()));
+      EntityCollection expandCollection = null;
+      if(association.getLeftColumnsList().isEmpty()){
+        expandCollection = ((JPAConvertibleResult) child).getEntityCollection(
+                buildConcatenatedKeyNew(parentRow, association.getJoinColumnsList()));
+      } else{
+        expandCollection = ((JPAConvertibleResult) child).getEntityCollection(
+                buildConcatenatedKey(parentRow, association.getLeftColumnsList()));
+      }
 
       expandCollection.setCount(determineCount(association, parentRow, child));
       if (association.getLeaf().isCollection()) {
