@@ -42,4 +42,11 @@
  
 
 	    </changeSet>
+
+    <changeSet  author="${author}"  id="modifyDataType-v1-01-02">
+        <modifyDataType columnName="Id" newDataType="SERIAL" schemaName="${schemaName}" tableName="Category"/>
+        <modifyDataType columnName="ProductId" newDataType="SERIAL" schemaName="${schemaName}" tableName="Product"/>
+        <addAutoIncrement schemaName="${schemaName}" tableName="Category" columnName="Id"/>
+        <addAutoIncrement schemaName="${schemaName}" tableName="Product"  columnName="ProductId"/>
+    </changeSet>
 </databaseChangeLog>

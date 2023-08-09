@@ -63,6 +63,7 @@ public class Product {
   }
 	  
   @Id
+  @GeneratedValue(strategy = GenerationType.IDENTITY)
   @Column(name = "\"ProductId\"", nullable = true )
   private Long productId;
 	  
@@ -81,7 +82,7 @@ public class Product {
   
   
 		@OneToOne(cascade = CascadeType.ALL)
-	@JoinColumn(name = "\"ProductProductCategory\"", referencedColumnName = "\"Id\"", insertable = false, updatable = false)
+	@JoinColumn(name = "\"ProductProductCategory\"", referencedColumnName = "\"Id\"", insertable = false, updatable = false )
         private Category productCategory;
 	
 	@Column(name = "\"ProductProductCategory\"")

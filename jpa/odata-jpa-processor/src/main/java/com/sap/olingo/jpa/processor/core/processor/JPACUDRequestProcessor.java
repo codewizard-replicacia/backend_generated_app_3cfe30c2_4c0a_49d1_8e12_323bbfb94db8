@@ -1,16 +1,13 @@
 package com.sap.olingo.jpa.processor.core.processor;
 
 import static com.sap.olingo.jpa.processor.core.converter.JPAExpandResult.ROOT_RESULT_KEY;
-import static com.sap.olingo.jpa.processor.core.exception.ODataJPAProcessorException.MessageKeys.ATTRIBUTE_NOT_FOUND;
-import static com.sap.olingo.jpa.processor.core.exception.ODataJPAProcessorException.MessageKeys.BEFORE_IMAGE_MERGED;
-import static com.sap.olingo.jpa.processor.core.exception.ODataJPAProcessorException.MessageKeys.ENTITY_TYPE_UNKNOWN;
-import static com.sap.olingo.jpa.processor.core.exception.ODataJPAProcessorException.MessageKeys.RETURN_MISSING_ENTITY;
-import static com.sap.olingo.jpa.processor.core.exception.ODataJPAProcessorException.MessageKeys.RETURN_NULL;
-import static com.sap.olingo.jpa.processor.core.exception.ODataJPAProcessorException.MessageKeys.WRONG_RETURN_TYPE;
+import static com.sap.olingo.jpa.processor.core.exception.ODataJPAProcessorException.MessageKeys.*;
 import static org.apache.olingo.commons.api.http.HttpStatusCode.BAD_REQUEST;
 import static org.apache.olingo.commons.api.http.HttpStatusCode.INTERNAL_SERVER_ERROR;
 import static org.apache.olingo.commons.api.http.HttpStatusCode.NO_CONTENT;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -21,6 +18,7 @@ import java.util.Optional;
 
 import javax.persistence.EntityManager;
 
+import com.sap.olingo.jpa.metadata.core.edm.mapper.api.*;
 import com.sap.olingo.jpa.metadata.core.edm.mapper.impl.IntermediateEntityType;
 import com.sap.olingo.jpa.processor.core.exception.ODataJPAFilterException;
 import com.sap.olingo.jpa.processor.core.exception.ODataJPAInvocationTargetException;
@@ -28,10 +26,7 @@ import com.sap.olingo.jpa.processor.core.exception.ODataJPAProcessException;
 import com.sap.olingo.jpa.processor.core.exception.ODataJPAProcessorException;
 import com.sap.olingo.jpa.processor.core.exception.ODataJPASerializerException;
 import com.sap.olingo.jpa.processor.core.exception.ODataJPATransactionException;
-import org.apache.olingo.commons.api.data.Entity;
-import org.apache.olingo.commons.api.data.EntityCollection;
-import org.apache.olingo.commons.api.data.Link;
-import org.apache.olingo.commons.api.data.Property;
+import org.apache.olingo.commons.api.data.*;
 import org.apache.olingo.commons.api.edm.EdmEntitySet;
 import org.apache.olingo.commons.api.edm.EdmSingleton;
 import org.apache.olingo.commons.api.ex.ODataException;
@@ -50,12 +45,6 @@ import org.apache.olingo.server.api.prefer.Preferences;
 import org.apache.olingo.server.api.prefer.Preferences.Return;
 import org.apache.olingo.server.api.serializer.SerializerException;
 
-import com.sap.olingo.jpa.metadata.core.edm.mapper.api.JPAAssociationPath;
-import com.sap.olingo.jpa.metadata.core.edm.mapper.api.JPAAttribute;
-import com.sap.olingo.jpa.metadata.core.edm.mapper.api.JPAElement;
-import com.sap.olingo.jpa.metadata.core.edm.mapper.api.JPAEntityType;
-import com.sap.olingo.jpa.metadata.core.edm.mapper.api.JPAPath;
-import com.sap.olingo.jpa.metadata.core.edm.mapper.api.JPAStructuredType;
 import com.sap.olingo.jpa.metadata.core.edm.mapper.exception.ODataJPAModelException;
 import com.sap.olingo.jpa.processor.core.api.JPACUDRequestHandler;
 import com.sap.olingo.jpa.processor.core.api.JPAODataRequestContextAccess;
@@ -222,11 +211,166 @@ public final class JPACUDRequestProcessor extends JPAAbstractRequestProcessor {
 
     if (!foreignTransaction)
       ownTransaction.commit();
-
+// <--------------------++
+    updateJoinColumn(result, odataEntity, request, edmEntitySetInfo, handler, requestEntity);
+// ++-------------------->>
     createCreateResponse(request, response, responseFormat, requestEntity, edmEntitySetInfo, result);
     debugger.stopRuntimeMeasurement(handle);
   }
+  // <--------------------++
+  public void updateJoinColumn(Object result, Entity odataEntity, final ODataRequest request,
+                                    EdmBindingTargetInfo edmEntitySetInfo, JPACUDRequestHandler handler,
+                                    JPARequestEntity requestEntity)
+          throws ODataApplicationException {
 
+    final int handle = debugger.startRuntimeMeasurement(this, DEBUG_CREATE_ENTITY);
+    String leftColumnNameInt = null;
+    String leftColumnNameExt = null;
+    String rightColumnNameInt = null;
+    String oneToOneAssoc = null;
+    String oneToOneAssocKey = null;
+// <-------Determine JoinColumn, one to one association, Key------->
+// <-------Assumption : one key & only one "onetoone" relation exists------->
+    try {
+      List<JPAAttribute> key = requestEntity.getEntityType().getKey();
+      if (!key.isEmpty()){
+        oneToOneAssocKey = key.get(0).getInternalName();
+      }
+      List<JPAAssociationPath> associationPathList = requestEntity.getEntityType().getAssociationPathList();
+      if (!associationPathList.isEmpty()){
+        JPAAssociationPath jpaAssociationPath = associationPathList.get(0);
+        oneToOneAssoc = jpaAssociationPath.getAlias();
+        List<JPAOnConditionItem> joinColumnsList = jpaAssociationPath.getJoinColumnsList();
+        if (!joinColumnsList.isEmpty()){
+          JPAOnConditionItem jpaOnConditionItem = joinColumnsList.get(0);
+          List<JPAElement> pathLeft = jpaOnConditionItem.getLeftPath().getPath();
+          JPAElement jpaElementLeft = pathLeft.get(0);
+          leftColumnNameInt = jpaElementLeft.getInternalName();
+          leftColumnNameExt = jpaElementLeft.getExternalName();
+
+          List<JPAElement> pathRight = jpaOnConditionItem.getRightPath().getPath();
+          JPAElement jpaElementRight = pathRight.get(0);
+          rightColumnNameInt = jpaElementRight.getInternalName();
+        }
+      }
+    } catch (ODataJPAModelException e) {
+      throw new RuntimeException(e);
+    }
+    if (leftColumnNameInt == null || rightColumnNameInt == null || oneToOneAssoc == null){
+      return;
+    }
+    // <-------Put Create transaction result in the map------->
+    Map<String, Object> stringObjectMap = determineGetter(result,oneToOneAssoc,leftColumnNameInt,rightColumnNameInt);
+    if ( stringObjectMap == null){
+    }else{
+      // <-------put JoinColumn data to be updated in the entity------->
+      if (!stringObjectMap.isEmpty() && stringObjectMap.containsKey(leftColumnNameInt)){
+        odataEntity.addProperty(new Property(null, leftColumnNameExt,
+                ValueType.PRIMITIVE, stringObjectMap.get(leftColumnNameInt)));
+
+        // <-------Get entity key & put it in the map object------->
+        Map<String, Object> keyMap = new HashMap<>();
+        for (Map.Entry<String, Object> entry : stringObjectMap.entrySet()) {
+          String k = entry.getKey();
+          Object v = entry.getValue();
+          if (k.equalsIgnoreCase(oneToOneAssocKey)){
+            keyMap.put(k,v);
+            break;
+          }
+        }
+// <-------Prepare update request entity------->
+        final JPARequestEntity updateRequestEntity = createRequestEntityNew(edmEntitySetInfo, odataEntity,
+                request.getAllHeaders(),keyMap);
+        // Update entity
+        Object result1 = null;
+        JPAODataTransaction ownTransaction1 = null;
+        final boolean foreignTransaction1 = requestContext.getTransactionFactory().hasActiveTransaction();
+        if (!foreignTransaction1)
+          ownTransaction1 = requestContext.getTransactionFactory().createTransaction();
+        try {
+          final int createHandle1 = debugger.startRuntimeMeasurement(handler, DEBUG_CREATE_ENTITY);
+          // <-------Call update------->
+          result1 = handler.updateEntity(updateRequestEntity, em, HttpMethod.PATCH);
+          if (!foreignTransaction1)
+            handler.validateChanges(em);
+          debugger.stopRuntimeMeasurement(createHandle1);
+        } catch (final ODataJPAProcessException e) {
+          checkForRollback(ownTransaction1, foreignTransaction1);
+          debugger.stopRuntimeMeasurement(handle);
+          throw e;
+        } catch (final Exception e) {
+          checkForRollback(ownTransaction1, foreignTransaction1);
+          debugger.stopRuntimeMeasurement(handle);
+          throw new ODataJPAProcessorException(e, INTERNAL_SERVER_ERROR);
+        }
+
+        if (result1 == null) {
+          checkForRollback(ownTransaction1, foreignTransaction1);
+          debugger.stopRuntimeMeasurement(handle);
+          throw new ODataJPAProcessorException(RETURN_NULL, INTERNAL_SERVER_ERROR);
+        }
+// <-------commit transaction------->
+        if (!foreignTransaction1)
+          ownTransaction1.commit();
+      }
+    }
+  }
+  public Map<String, Object> determineGetter(final Object instance, final String oneToOneAssoc,
+                                             final String leftColumnNameInt , final String rightColumnNameInt) throws ODataJPAProcessorException {
+    Map<String, Object> getterMap;
+    getterMap = new HashMap<>();
+    Map<String, Object> childObjectMap = null; // <--------------------++
+    final Method[] methods = instance.getClass().getMethods();
+    for (final Method meth : methods) {
+      final String methodName = meth.getName();
+      if (methodName.substring(0, 3).equals("get") && methodName.length() > 3) {
+        final String attributeName = methodName.substring(3, 4).toLowerCase() + methodName.substring(4);
+        try {
+          final Object value = meth.invoke(instance);
+          getterMap.put(attributeName, value);
+          // <-------Get one to one association attributes------->
+          // <--------------------++
+          if(attributeName.equalsIgnoreCase(oneToOneAssoc)){
+            childObjectMap = determineGetter(value,oneToOneAssoc,leftColumnNameInt,rightColumnNameInt);
+          }
+          // ++-------------------->>
+        } catch (IllegalAccessException | IllegalArgumentException | InvocationTargetException e) {
+          throw new ODataJPAProcessorException(ODataJPAProcessorException.MessageKeys.ATTRIBUTE_RETRIEVAL_FAILED,
+                  HttpStatusCode.INTERNAL_SERVER_ERROR, e, attributeName);
+        }
+      }
+    }
+    // <--------------------++
+    if ( childObjectMap == null){
+    }else{
+      if (!childObjectMap.isEmpty()){
+        getterMap.put(leftColumnNameInt,childObjectMap.get(rightColumnNameInt));
+      }
+    }
+    // ++-------------------->>
+    return getterMap;
+  }
+  final JPARequestEntity createRequestEntityNew( final EdmBindingTargetInfo edmEntitySetInfo,
+                                                 final Entity odataEntity,
+                                                 final Map<String, List<String>> headers,
+                                                 final Map<String, Object> keys )
+          throws ODataJPAProcessorException {
+
+    try {
+      final JPAEntityType et = sd.getEntity(edmEntitySetInfo
+              .getName());
+      if (et == null)
+        throw new ODataJPAProcessorException(ENTITY_TYPE_UNKNOWN, BAD_REQUEST, edmEntitySetInfo.getName());
+//      final Map<String, Object> keys = helper.convertUriKeys(odata, et, edmEntitySetInfo.getKeyPredicates());
+      final JPARequestEntityImpl requestEntity = (JPARequestEntityImpl) createRequestEntity(et, odataEntity, keys,
+              headers, et.getAssociationPath(edmEntitySetInfo.getNavigationPath()));
+      requestEntity.setBeforeImage(createBeforeImage(requestEntity, em));
+      return requestEntity;
+    } catch (final ODataException e) {
+      throw new ODataJPAProcessorException(e, BAD_REQUEST);
+    }
+  }
+// ++-------------------->>
 
   public void deleteMediaEntity(ODataRequest request, ODataResponse response) throws ODataJPAProcessException, ODataJPAModelException {
     final int handle = debugger.startRuntimeMeasurement(this, DEBUG_DELETE_MEDIA_ENTITY);
