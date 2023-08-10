@@ -265,6 +265,9 @@ public final class JPACUDRequestProcessor extends JPAAbstractRequestProcessor {
     }else{
       // <-------put JoinColumn data to be updated in the entity------->
       if (!stringObjectMap.isEmpty() && stringObjectMap.containsKey(leftColumnNameInt)){
+        if(stringObjectMap.get(leftColumnNameInt) == null){
+          return;
+        }
         odataEntity.addProperty(new Property(null, leftColumnNameExt,
                 ValueType.PRIMITIVE, stringObjectMap.get(leftColumnNameInt)));
 
@@ -330,7 +333,7 @@ public final class JPACUDRequestProcessor extends JPAAbstractRequestProcessor {
           getterMap.put(attributeName, value);
           // <-------Get one to one association attributes------->
           // <--------------------++
-          if(attributeName.equalsIgnoreCase(oneToOneAssoc)){
+          if(attributeName.equalsIgnoreCase(oneToOneAssoc) && value != null){
             childObjectMap = determineGetter(value,oneToOneAssoc,leftColumnNameInt,rightColumnNameInt);
           }
           // ++-------------------->>
